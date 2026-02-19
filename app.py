@@ -1,12 +1,14 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-from streamlit_plotly_events import plotly_events
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+from streamlit_image_coordinates import streamlit_image_coordinates
 import io
 import json
-import streamlit as st
+
+# -------------------------
+# Page setup
+# -------------------------
 
 st.set_page_config(
     page_title="Scientific Plot Digitizer",
@@ -15,81 +17,53 @@ st.set_page_config(
 )
 
 st.title("📈 Scientific Plot Digitizer")
+st.write("Developed by Manasij Yadava")
 
-st.markdown("""
-**Developed by Manasij Yadava**
-
-Extract numerical data from plots using interactive point selection.
-
-Features:
-- Zoom and pan
-- Click-to-select points
-- Automatic scaling
-- Export to CSV and Excel
-- Save and reload sessions
-""")
-
-st.set_page_config(layout="wide")
-
-st.title("Scientific Plot Digitizer")
-
-# --------------------------
-# Session state initialization
-# --------------------------
+# -------------------------
+# Session initialization
+# -------------------------
 
 def init_session():
-    if "x_refs" not in st.session_state:
-        st.session_state.x_refs = []
 
-    if "y_refs" not in st.session_state:
-        st.session_state.y_refs = []
+    defaults = {
+        "x_refs": [],
+        "y_refs": [],
+        "data_points": [],
+        "image": None
+    }
 
-    if "data_points" not in st.session_state:
-        st.session_state.data_points = []
+    for key, value in defaults.items():
 
-    if "mode" not in st.session_state:
-        st.session_state.mode = "data"
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 init_session()
 
-# --------------------------
+# -------------------------
 # Sidebar controls
-# --------------------------
+# -------------------------
 
 st.sidebar.header("Controls")
 
 mode = st.sidebar.radio(
-    "Select mode",
-    ["x_ref", "y_ref", "data"],
-    format_func=lambda x: {
-        "x_ref": "X reference points",
-        "y_ref": "Y reference points",
-        "data": "Data points"
-    }[x]
+    "Selection mode",
+    ["Data points", "X reference", "Y reference"]
 )
 
-st.session_state.mode = mode
-
-num_points = st.sidebar.number_input(
-    "Max data points",
-    min_value=1,
-    value=50
-)
-
-# Undo button
+# Undo
 if st.sidebar.button("Undo last point"):
 
-    if mode == "x_ref" and st.session_state.x_refs:
-        st.session_state.x_refs.pop()
-
-    elif mode == "y_ref" and st.session_state.y_refs:
-        st.session_state.y_refs.pop()
-
-    elif mode == "data" and st.session_state.data_points:
+    if mode == "Data points" and st.session_state.data_points:
         st.session_state.data_points.pop()
 
-# Reset button
-if st.sidebar.button("Reset session"):
+    elif mode == "X reference" and st.session_state.x_refs:
+        st.session_state.x_refs.pop()
+
+    elif mode == "Y reference" and st.session_state.y_refs:
+        st.session_state.y_refs.pop()
+
+# Reset
+if st.sidebar.button("Reset all"):
 
     st.session_state.x_refs = []
     st.session_state.y_refs = []
@@ -98,7 +72,7 @@ if st.sidebar.button("Reset session"):
 # Save session
 if st.sidebar.button("Save session"):
 
-    session_data = {
+    session = {
         "x_refs": st.session_state.x_refs,
         "y_refs": st.session_state.y_refs,
         "data_points": st.session_state.data_points
@@ -106,121 +80,125 @@ if st.sidebar.button("Save session"):
 
     st.sidebar.download_button(
         "Download session file",
-        json.dumps(session_data),
-        "session.json"
+        json.dumps(session),
+        "digitizer_session.json"
     )
 
 # Load session
 uploaded_session = st.sidebar.file_uploader(
     "Load session",
-    type=["json"]
+    type="json"
 )
 
 if uploaded_session:
 
-    session_data = json.load(uploaded_session)
+    session = json.load(uploaded_session)
 
-    st.session_state.x_refs = session_data["x_refs"]
-    st.session_state.y_refs = session_data["y_refs"]
-    st.session_state.data_points = session_data["data_points"]
+    st.session_state.x_refs = session["x_refs"]
+    st.session_state.y_refs = session["y_refs"]
+    st.session_state.data_points = session["data_points"]
 
-# --------------------------
+# -------------------------
 # Upload image
-# --------------------------
+# -------------------------
 
 uploaded_image = st.file_uploader(
-    "Upload image",
+    "Upload plot image",
     type=["png", "jpg", "jpeg"]
 )
 
-if uploaded_image is None:
+if uploaded_image:
+
+    st.session_state.image = Image.open(uploaded_image)
+
+if st.session_state.image is None:
+
     st.stop()
 
-image = Image.open(uploaded_image)
-img_array = np.array(image)
+image = st.session_state.image.copy()
 
-height, width = img_array.shape[:2]
+# -------------------------
+# Draw numbered points
+# -------------------------
 
-# --------------------------
-# Plotly figure (zoom/pan enabled)
-# --------------------------
+draw = ImageDraw.Draw(image)
 
-fig = go.Figure()
+def draw_points(points, color, prefix):
 
-fig.add_layout_image(
-    dict(
-        source=image,
-        xref="x",
-        yref="y",
-        x=0,
-        y=0,
-        sizex=width,
-        sizey=height,
-        sizing="stretch",
-        layer="below"
-    )
+    for i, (x, y) in enumerate(points):
+
+        r = 5
+
+        draw.ellipse(
+            (x-r, y-r, x+r, y+r),
+            fill=color
+        )
+
+        draw.text(
+            (x+5, y+5),
+            f"{prefix}{i+1}",
+            fill=color
+        )
+
+draw_points(st.session_state.x_refs, "red", "X")
+draw_points(st.session_state.y_refs, "green", "Y")
+draw_points(st.session_state.data_points, "blue", "P")
+
+# -------------------------
+# Capture clicks
+# -------------------------
+
+st.write(f"Mode: {mode}")
+
+coords = streamlit_image_coordinates(
+    image,
+    key="plot",
 )
 
-fig.update_xaxes(range=[0, width])
-fig.update_yaxes(range=[height, 0])
+if coords:
 
-fig.update_layout(
-    dragmode="pan",
-    width=900,
-    height=700
-)
+    x = coords["x"]
+    y = coords["y"]
 
-# Plot existing points with numbering
+    point = [x, y]
 
-def plot_points(points, color, label):
+    if mode == "Data points":
 
-    if points:
+        if point not in st.session_state.data_points:
+            st.session_state.data_points.append(point)
 
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
+    elif mode == "X reference":
 
-        fig.add_trace(go.Scatter(
-            x=xs,
-            y=ys,
-            mode="markers+text",
-            marker=dict(color=color, size=10),
-            text=[f"{label}{i+1}" for i in range(len(points))],
-            textposition="top center"
-        ))
+        if len(st.session_state.x_refs) < 2:
+            st.session_state.x_refs.append(point)
 
-plot_points(st.session_state.x_refs, "red", "X")
-plot_points(st.session_state.y_refs, "green", "Y")
-plot_points(st.session_state.data_points, "blue", "P")
+    elif mode == "Y reference":
 
-# --------------------------
-# Capture click events
-# --------------------------
+        if len(st.session_state.y_refs) < 2:
+            st.session_state.y_refs.append(point)
 
-clicks = plotly_events(fig, click_event=True)
+# -------------------------
+# Show point lists
+# -------------------------
 
-if clicks:
+col1, col2, col3 = st.columns(3)
 
-    x = clicks[0]["x"]
-    y = clicks[0]["y"]
+with col1:
+    st.write("X refs:", st.session_state.x_refs)
 
-    if mode == "x_ref" and len(st.session_state.x_refs) < 2:
-        st.session_state.x_refs.append([x, y])
+with col2:
+    st.write("Y refs:", st.session_state.y_refs)
 
-    elif mode == "y_ref" and len(st.session_state.y_refs) < 2:
-        st.session_state.y_refs.append([x, y])
+with col3:
+    st.write("Data:", len(st.session_state.data_points), "points")
 
-    elif mode == "data" and len(st.session_state.data_points) < num_points:
-        st.session_state.data_points.append([x, y])
-
-    st.rerun()
-
-# --------------------------
-# Scaling input
-# --------------------------
+# -------------------------
+# Scaling and export
+# -------------------------
 
 if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
 
-    st.header("Scaling parameters")
+    st.header("Enter actual reference values")
 
     col1, col2 = st.columns(2)
 
@@ -240,13 +218,15 @@ if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
         ypix = np.array([p[1] for p in st.session_state.data_points])
 
         xscale = (x2 - x1) / (
-            st.session_state.x_refs[1][0] - st.session_state.x_refs[0][0]
+            st.session_state.x_refs[1][0]
+            - st.session_state.x_refs[0][0]
         )
 
         xoffset = x1 - xscale * st.session_state.x_refs[0][0]
 
         yscale = (y2 - y1) / (
-            st.session_state.y_refs[1][1] - st.session_state.y_refs[0][1]
+            st.session_state.y_refs[1][1]
+            - st.session_state.y_refs[0][1]
         )
 
         yoffset = y1 - yscale * st.session_state.y_refs[0][1]
@@ -265,14 +245,14 @@ if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
 
         st.dataframe(df)
 
-        # CSV download
+        # CSV
         st.download_button(
             "Download CSV",
             df.to_csv(index=False),
-            "data.csv"
+            "digitized_data.csv"
         )
 
-        # Excel download
+        # Excel
         excel_buffer = io.BytesIO()
 
         df.to_excel(excel_buffer, index=False)
@@ -280,6 +260,5 @@ if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
         st.download_button(
             "Download Excel",
             excel_buffer.getvalue(),
-            "data.xlsx"
+            "digitized_data.xlsx"
         )
-

@@ -1,7 +1,7 @@
 streamlit
 numpy
-pillow
 pandas
+pillow
 openpyxl
-plotly
-streamlit-plotly-events
+streamlit-image-coordinates
+matplotlib

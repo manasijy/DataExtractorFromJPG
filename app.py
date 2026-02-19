@@ -1,13 +1,13 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw, ImageFont
-from streamlit_image_coordinates import streamlit_image_coordinates
+from PIL import Image, ImageDraw
 import io
 import json
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 # -------------------------
-# Page setup
+# PAGE CONFIG
 # -------------------------
 
 st.set_page_config(
@@ -17,30 +17,31 @@ st.set_page_config(
 )
 
 st.title("📈 Scientific Plot Digitizer")
-st.write("Developed by Manasij Yadava")
+st.write("Professional digitizer with zoom, scaling, and export")
 
 # -------------------------
-# Session initialization
+# SESSION INIT
 # -------------------------
 
-def init_session():
+def init():
 
     defaults = {
+        "image": None,
         "x_refs": [],
         "y_refs": [],
         "data_points": [],
-        "image": None
+        "last_point": None
     }
 
-    for key, value in defaults.items():
+    for k, v in defaults.items():
 
-        if key not in st.session_state:
-            st.session_state[key] = value
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-init_session()
+init()
 
 # -------------------------
-# Sidebar controls
+# SIDEBAR
 # -------------------------
 
 st.sidebar.header("Controls")
@@ -48,6 +49,14 @@ st.sidebar.header("Controls")
 mode = st.sidebar.radio(
     "Selection mode",
     ["Data points", "X reference", "Y reference"]
+)
+
+zoom = st.sidebar.slider(
+    "Zoom",
+    0.5,
+    3.0,
+    1.0,
+    0.1
 )
 
 # Undo
@@ -62,12 +71,19 @@ if st.sidebar.button("Undo last point"):
     elif mode == "Y reference" and st.session_state.y_refs:
         st.session_state.y_refs.pop()
 
+# Delete specific point
+if st.sidebar.button("Delete last data point"):
+
+    if st.session_state.data_points:
+        st.session_state.data_points.pop()
+
 # Reset
-if st.sidebar.button("Reset all"):
+if st.sidebar.button("Reset ALL"):
 
     st.session_state.x_refs = []
     st.session_state.y_refs = []
     st.session_state.data_points = []
+    st.session_state.last_point = None
 
 # Save session
 if st.sidebar.button("Save session"):
@@ -79,9 +95,9 @@ if st.sidebar.button("Save session"):
     }
 
     st.sidebar.download_button(
-        "Download session file",
+        "Download session",
         json.dumps(session),
-        "digitizer_session.json"
+        "session.json"
     )
 
 # Load session
@@ -99,7 +115,7 @@ if uploaded_session:
     st.session_state.data_points = session["data_points"]
 
 # -------------------------
-# Upload image
+# IMAGE LOAD
 # -------------------------
 
 uploaded_image = st.file_uploader(
@@ -112,31 +128,39 @@ if uploaded_image:
     st.session_state.image = Image.open(uploaded_image)
 
 if st.session_state.image is None:
-
     st.stop()
 
-image = st.session_state.image.copy()
+# Apply zoom
+base_image = st.session_state.image
+width, height = base_image.size
 
-# -------------------------
-# Draw numbered points
-# -------------------------
+image = base_image.resize(
+    (int(width * zoom), int(height * zoom))
+)
 
 draw = ImageDraw.Draw(image)
 
-def draw_points(points, color, prefix):
+# -------------------------
+# DRAW POINTS
+# -------------------------
+
+def draw_points(points, color, label):
 
     for i, (x, y) in enumerate(points):
 
-        r = 5
+        zx = int(x * zoom)
+        zy = int(y * zoom)
+
+        r = 4
 
         draw.ellipse(
-            (x-r, y-r, x+r, y+r),
+            (zx-r, zy-r, zx+r, zy+r),
             fill=color
         )
 
         draw.text(
-            (x+5, y+5),
-            f"{prefix}{i+1}",
+            (zx+5, zy+5),
+            f"{label}{i+1}",
             fill=color
         )
 
@@ -145,99 +169,91 @@ draw_points(st.session_state.y_refs, "green", "Y")
 draw_points(st.session_state.data_points, "blue", "P")
 
 # -------------------------
-# Capture clicks
+# CLICK CAPTURE
 # -------------------------
 
-st.write(f"Mode: {mode}")
+st.write("Mode:", mode)
 
 coords = streamlit_image_coordinates(
     image,
-    key="plot",
+    key="digitizer"
 )
 
-if coords:
+if coords is not None:
 
-    x = coords["x"]
-    y = coords["y"]
+    x = int(coords["x"] / zoom)
+    y = int(coords["y"] / zoom)
 
-    point = [x, y]
+    new_point = [x, y]
 
-    if mode == "Data points":
+    if st.session_state.last_point != new_point:
 
-        if point not in st.session_state.data_points:
-            st.session_state.data_points.append(point)
+        st.session_state.last_point = new_point
 
-    elif mode == "X reference":
+        if mode == "Data points":
 
-        if len(st.session_state.x_refs) < 2:
-            st.session_state.x_refs.append(point)
+            if new_point not in st.session_state.data_points:
+                st.session_state.data_points.append(new_point)
 
-    elif mode == "Y reference":
+        elif mode == "X reference":
 
-        if len(st.session_state.y_refs) < 2:
-            st.session_state.y_refs.append(point)
+            if len(st.session_state.x_refs) < 2:
+                st.session_state.x_refs.append(new_point)
+
+        elif mode == "Y reference":
+
+            if len(st.session_state.y_refs) < 2:
+                st.session_state.y_refs.append(new_point)
 
 # -------------------------
-# Show point lists
+# DISPLAY STATUS
 # -------------------------
 
 col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.write("X refs:", st.session_state.x_refs)
-
-with col2:
-    st.write("Y refs:", st.session_state.y_refs)
-
-with col3:
-    st.write("Data:", len(st.session_state.data_points), "points")
+col1.write("X refs:", st.session_state.x_refs)
+col2.write("Y refs:", st.session_state.y_refs)
+col3.write("Data points:", len(st.session_state.data_points))
 
 # -------------------------
-# Scaling and export
+# SCALING
 # -------------------------
 
 if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
 
-    st.header("Enter actual reference values")
+    st.header("Enter reference values")
 
     col1, col2 = st.columns(2)
 
     with col1:
 
-        x1 = st.number_input("X value ref 1")
-        x2 = st.number_input("X value ref 2")
+        x1 = st.number_input("X reference 1 value")
+        x2 = st.number_input("X reference 2 value")
 
     with col2:
 
-        y1 = st.number_input("Y value ref 1")
-        y2 = st.number_input("Y value ref 2")
+        y1 = st.number_input("Y reference 1 value")
+        y2 = st.number_input("Y reference 2 value")
 
     def convert():
 
         xpix = np.array([p[0] for p in st.session_state.data_points])
         ypix = np.array([p[1] for p in st.session_state.data_points])
 
-        xscale = (x2 - x1) / (
-            st.session_state.x_refs[1][0]
-            - st.session_state.x_refs[0][0]
-        )
+        xref = st.session_state.x_refs
+        yref = st.session_state.y_refs
 
-        xoffset = x1 - xscale * st.session_state.x_refs[0][0]
+        xscale = (x2 - x1) / (xref[1][0] - xref[0][0])
+        xoffset = x1 - xscale * xref[0][0]
 
-        yscale = (y2 - y1) / (
-            st.session_state.y_refs[1][1]
-            - st.session_state.y_refs[0][1]
-        )
-
-        yoffset = y1 - yscale * st.session_state.y_refs[0][1]
+        # FIXED Y INVERSION
+        yscale = (y2 - y1) / (yref[0][1] - yref[1][1])
+        yoffset = y1 - yscale * yref[0][1]
 
         xdata = xscale * xpix + xoffset
         ydata = yscale * ypix + yoffset
 
-        return pd.DataFrame({
-            "x": xdata,
-            "y": ydata
-        })
+        return pd.DataFrame({"x": xdata, "y": ydata})
 
     if st.button("Generate output"):
 
@@ -245,20 +261,17 @@ if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
 
         st.dataframe(df)
 
-        # CSV
         st.download_button(
             "Download CSV",
             df.to_csv(index=False),
             "digitized_data.csv"
         )
 
-        # Excel
-        excel_buffer = io.BytesIO()
-
-        df.to_excel(excel_buffer, index=False)
+        excel = io.BytesIO()
+        df.to_excel(excel, index=False)
 
         st.download_button(
             "Download Excel",
-            excel_buffer.getvalue(),
+            excel.getvalue(),
             "digitized_data.xlsx"
         )

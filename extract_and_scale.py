@@ -1,65 +1,262 @@
-# python extract_and_scale.py --img aa2219Data.jpg --num 25 --out extracted_points.csv
-import matplotlib.pyplot as plt
-import csv
-import argparse
+import streamlit as st
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from streamlit_plotly_events import plotly_events
+from PIL import Image
+import io
+import json
 
-def get_scaling_parameters(img_path):
-    """
-    Interactively get scaling parameters for x and y axes.
-    User clicks two reference points for each axis and enters their actual values.
-    Returns: (x_ref_pixels, x_ref_values, y_ref_pixels, y_ref_values)
-    """
-    img = plt.imread(img_path)
-    plt.imshow(img)
-    plt.title('Click two reference points on the X axis, then two on the Y axis.\nClose the window after selecting.')
-    ref_points = plt.ginput(4, timeout=0)
-    plt.close()
-    print("Reference points (pixels):", ref_points)
+st.set_page_config(layout="wide")
 
-    print("Enter actual values for the two X axis reference points:")
-    x_val1 = float(input("Actual value for first X point: "))
-    x_val2 = float(input("Actual value for second X point: "))
-    print("Enter actual values for the two Y axis reference points:")
-    y_val1 = float(input("Actual value for first Y point: "))
-    y_val2 = float(input("Actual value for second Y point: "))
+st.title("Scientific Plot Digitizer")
 
-    x_ref_pixels = [ref_points[0][0], ref_points[1][0]]
-    x_ref_values = [x_val1, x_val2]
-    y_ref_pixels = [ref_points[2][1], ref_points[3][1]]
-    y_ref_values = [y_val1, y_val2]
+# --------------------------
+# Session state initialization
+# --------------------------
 
-    print("Scaling parameters set.")
-    return x_ref_pixels, x_ref_values, y_ref_pixels, y_ref_values
+def init_session():
+    if "x_refs" not in st.session_state:
+        st.session_state.x_refs = []
 
-def pixel_to_data(x_pixel, y_pixel, x_ref_pixels, x_ref_values, y_ref_pixels, y_ref_values):
-    x_scale = (x_ref_values[1] - x_ref_values[0]) / (x_ref_pixels[1] - x_ref_pixels[0])
-    x_offset = x_ref_values[0] - x_scale * x_ref_pixels[0]
-    y_scale = (y_ref_values[1] - y_ref_values[0]) / (y_ref_pixels[1] - y_ref_pixels[0])
-    y_offset = y_ref_values[0] - y_scale * y_ref_pixels[0]
-    x_data = x_scale * x_pixel + x_offset
-    y_data = y_scale * y_pixel + y_offset
-    return x_data, y_data
+    if "y_refs" not in st.session_state:
+        st.session_state.y_refs = []
 
-def extract_and_save_scaled_points(img_path, num_points, output_csv):
-    print("First, select reference points for scaling.")
-    x_ref_pixels, x_ref_values, y_ref_pixels, y_ref_values = get_scaling_parameters(img_path)
-    print("Now, select the data points you want to extract.")
-    img = plt.imread(img_path)
-    plt.imshow(img)
-    plt.title('Click on the data points you want to record\nClose the window after selecting points')
-    points = plt.ginput(num_points, timeout=0)
-    plt.close()
-    scaled_points = [pixel_to_data(x, y, x_ref_pixels, x_ref_values, y_ref_pixels, y_ref_values) for x, y in points]
-    with open(output_csv, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['x', 'y'])
-        writer.writerows(scaled_points)
-    print(f"{len(points)} points extracted and saved to '{output_csv}' (scaled values)")
+    if "data_points" not in st.session_state:
+        st.session_state.data_points = []
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Extract scaled points from an image and save to CSV.")
-    parser.add_argument('--img', type=str, required=True, help="Image file path")
-    parser.add_argument('--num', type=int, default=25, help="Number of points to extract")
-    parser.add_argument('--out', type=str, default="extracted_points.csv", help="Output CSV filename")
-    args = parser.parse_args()
-    extract_and_save_scaled_points(args.img, args.num, args.out)
+    if "mode" not in st.session_state:
+        st.session_state.mode = "data"
+
+init_session()
+
+# --------------------------
+# Sidebar controls
+# --------------------------
+
+st.sidebar.header("Controls")
+
+mode = st.sidebar.radio(
+    "Select mode",
+    ["x_ref", "y_ref", "data"],
+    format_func=lambda x: {
+        "x_ref": "X reference points",
+        "y_ref": "Y reference points",
+        "data": "Data points"
+    }[x]
+)
+
+st.session_state.mode = mode
+
+num_points = st.sidebar.number_input(
+    "Max data points",
+    min_value=1,
+    value=50
+)
+
+# Undo button
+if st.sidebar.button("Undo last point"):
+
+    if mode == "x_ref" and st.session_state.x_refs:
+        st.session_state.x_refs.pop()
+
+    elif mode == "y_ref" and st.session_state.y_refs:
+        st.session_state.y_refs.pop()
+
+    elif mode == "data" and st.session_state.data_points:
+        st.session_state.data_points.pop()
+
+# Reset button
+if st.sidebar.button("Reset session"):
+
+    st.session_state.x_refs = []
+    st.session_state.y_refs = []
+    st.session_state.data_points = []
+
+# Save session
+if st.sidebar.button("Save session"):
+
+    session_data = {
+        "x_refs": st.session_state.x_refs,
+        "y_refs": st.session_state.y_refs,
+        "data_points": st.session_state.data_points
+    }
+
+    st.sidebar.download_button(
+        "Download session file",
+        json.dumps(session_data),
+        "session.json"
+    )
+
+# Load session
+uploaded_session = st.sidebar.file_uploader(
+    "Load session",
+    type=["json"]
+)
+
+if uploaded_session:
+
+    session_data = json.load(uploaded_session)
+
+    st.session_state.x_refs = session_data["x_refs"]
+    st.session_state.y_refs = session_data["y_refs"]
+    st.session_state.data_points = session_data["data_points"]
+
+# --------------------------
+# Upload image
+# --------------------------
+
+uploaded_image = st.file_uploader(
+    "Upload image",
+    type=["png", "jpg", "jpeg"]
+)
+
+if uploaded_image is None:
+    st.stop()
+
+image = Image.open(uploaded_image)
+img_array = np.array(image)
+
+height, width = img_array.shape[:2]
+
+# --------------------------
+# Plotly figure (zoom/pan enabled)
+# --------------------------
+
+fig = go.Figure()
+
+fig.add_layout_image(
+    dict(
+        source=image,
+        xref="x",
+        yref="y",
+        x=0,
+        y=0,
+        sizex=width,
+        sizey=height,
+        sizing="stretch",
+        layer="below"
+    )
+)
+
+fig.update_xaxes(range=[0, width])
+fig.update_yaxes(range=[height, 0])
+
+fig.update_layout(
+    dragmode="pan",
+    width=900,
+    height=700
+)
+
+# Plot existing points with numbering
+
+def plot_points(points, color, label):
+
+    if points:
+
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+
+        fig.add_trace(go.Scatter(
+            x=xs,
+            y=ys,
+            mode="markers+text",
+            marker=dict(color=color, size=10),
+            text=[f"{label}{i+1}" for i in range(len(points))],
+            textposition="top center"
+        ))
+
+plot_points(st.session_state.x_refs, "red", "X")
+plot_points(st.session_state.y_refs, "green", "Y")
+plot_points(st.session_state.data_points, "blue", "P")
+
+# --------------------------
+# Capture click events
+# --------------------------
+
+clicks = plotly_events(fig, click_event=True)
+
+if clicks:
+
+    x = clicks[0]["x"]
+    y = clicks[0]["y"]
+
+    if mode == "x_ref" and len(st.session_state.x_refs) < 2:
+        st.session_state.x_refs.append([x, y])
+
+    elif mode == "y_ref" and len(st.session_state.y_refs) < 2:
+        st.session_state.y_refs.append([x, y])
+
+    elif mode == "data" and len(st.session_state.data_points) < num_points:
+        st.session_state.data_points.append([x, y])
+
+    st.rerun()
+
+# --------------------------
+# Scaling input
+# --------------------------
+
+if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
+
+    st.header("Scaling parameters")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        x1 = st.number_input("X value ref 1")
+        x2 = st.number_input("X value ref 2")
+
+    with col2:
+
+        y1 = st.number_input("Y value ref 1")
+        y2 = st.number_input("Y value ref 2")
+
+    def convert():
+
+        xpix = np.array([p[0] for p in st.session_state.data_points])
+        ypix = np.array([p[1] for p in st.session_state.data_points])
+
+        xscale = (x2 - x1) / (
+            st.session_state.x_refs[1][0] - st.session_state.x_refs[0][0]
+        )
+
+        xoffset = x1 - xscale * st.session_state.x_refs[0][0]
+
+        yscale = (y2 - y1) / (
+            st.session_state.y_refs[1][1] - st.session_state.y_refs[0][1]
+        )
+
+        yoffset = y1 - yscale * st.session_state.y_refs[0][1]
+
+        xdata = xscale * xpix + xoffset
+        ydata = yscale * ypix + yoffset
+
+        return pd.DataFrame({
+            "x": xdata,
+            "y": ydata
+        })
+
+    if st.button("Generate output"):
+
+        df = convert()
+
+        st.dataframe(df)
+
+        # CSV download
+        st.download_button(
+            "Download CSV",
+            df.to_csv(index=False),
+            "data.csv"
+        )
+
+        # Excel download
+        excel_buffer = io.BytesIO()
+
+        df.to_excel(excel_buffer, index=False)
+
+        st.download_button(
+            "Download Excel",
+            excel_buffer.getvalue(),
+            "data.xlsx"
+        )

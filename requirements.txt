@@ -1,5 +1,7 @@
 streamlit
-matplotlib
 numpy
 pillow
-scipy
+pandas
+openpyxl
+plotly
+streamlit-plotly-events

@@ -211,9 +211,16 @@ if coords is not None:
 
 col1, col2, col3 = st.columns(3)
 
-col1.write("X refs:", st.session_state.x_refs)
-col2.write("Y refs:", st.session_state.y_refs)
-col3.write("Data points:", len(st.session_state.data_points))
+col1.metric("X references", len(st.session_state.x_refs))
+col2.metric("Y references", len(st.session_state.y_refs))
+col3.metric("Data points", len(st.session_state.data_points))
+
+with st.expander("Show point details"):
+
+    st.write("X refs:", st.session_state.x_refs)
+    st.write("Y refs:", st.session_state.y_refs)
+    st.write("Data points:", st.session_state.data_points)
+
 
 # -------------------------
 # SCALING
@@ -275,3 +282,4 @@ if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
             excel.getvalue(),
             "digitized_data.xlsx"
         )
+

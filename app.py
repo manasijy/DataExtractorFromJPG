@@ -6,6 +6,28 @@ from streamlit_plotly_events import plotly_events
 from PIL import Image
 import io
 import json
+import streamlit as st
+
+st.set_page_config(
+    page_title="Scientific Plot Digitizer",
+    page_icon="📈",
+    layout="wide"
+)
+
+st.title("📈 Scientific Plot Digitizer")
+
+st.markdown("""
+**Developed by Manasij Yadava**
+
+Extract numerical data from plots using interactive point selection.
+
+Features:
+- Zoom and pan
+- Click-to-select points
+- Automatic scaling
+- Export to CSV and Excel
+- Save and reload sessions
+""")
 
 st.set_page_config(layout="wide")
 
@@ -260,3 +282,4 @@ if len(st.session_state.x_refs) == 2 and len(st.session_state.y_refs) == 2:
             excel_buffer.getvalue(),
             "data.xlsx"
         )
+
